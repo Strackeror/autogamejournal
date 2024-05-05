@@ -1,0 +1,6 @@
+target_folder = "./screenshots"
+screenshot_delay = 3
+
+[[rules]]
+name = "explorer"
+ignore = true

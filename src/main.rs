@@ -1,10 +1,10 @@
-#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 use std::{
     fs::create_dir_all,
-    path::Path,
+    path::{Path, PathBuf},
     time::{Duration, Instant},
 };
 use tao::{
@@ -18,9 +18,9 @@ use tray_icon::{
 use windows_capture::capture::GraphicsCaptureApiHandler;
 use winsafe::{prelude::*, GetLastError, HMONITOR, HPROCESSLIST, HWND};
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 struct Config {
-    target_folder: Box<Path>,
+    target_folder: PathBuf,
     screenshot_delay: u64,
     #[serde(default)]
     rules: Vec<RuleEntry>,
@@ -182,8 +182,7 @@ fn get_last_input_time() -> Result<u32> {
     Ok(info.dwTime)
 }
 
-fn screenshot_thread() -> ! {
-    let config: Config = toml::from_str(&std::fs::read_to_string("config.toml").unwrap()).unwrap();
+fn screenshot_thread(config: Config) -> ! {
     let mut last_input = 0;
 
     loop {
@@ -218,11 +217,20 @@ fn screenshot_thread() -> ! {
 }
 
 fn main() {
+    let config: Config = toml::from_str(&std::fs::read_to_string("config.toml").unwrap()).unwrap();
+    let target_path = config
+        .target_folder
+        .canonicalize()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
 
-    let _thread = std::thread::spawn(screenshot_thread);
+    let _thread = std::thread::spawn(|| screenshot_thread(config));
     let mut _tray_icon = None;
 
     let quit_menu_item = MenuItem::new("Quit", true, None);
+    let open_menu_item = MenuItem::new("Open", true, None);
 
     let event_loop = EventLoopBuilder::new().build();
     event_loop.run(move |event, _, control_flow| {
@@ -234,6 +242,7 @@ fn main() {
 
             let menu = Menu::new();
             menu.append(&quit_menu_item).unwrap();
+            menu.append(&open_menu_item).unwrap();
 
             _tray_icon = Some(
                 TrayIconBuilder::new()
@@ -249,6 +258,14 @@ fn main() {
         if let Ok(event) = MenuEvent::receiver().try_recv() {
             if event.id == quit_menu_item.id() {
                 *control_flow = ControlFlow::Exit;
+            }
+            if event.id == open_menu_item.id() {
+                use winsafe::co::SW;
+                if let Err(e) =
+                    HWND::NULL.ShellExecute("explore", &target_path, None, None, SW::SHOWNORMAL)
+                {
+                    println!("Error opening folder {target_path:?} {e:?}");
+                }
             }
         }
     });

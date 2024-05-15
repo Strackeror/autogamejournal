@@ -176,7 +176,7 @@ fn get_last_input_time() -> Result<u32> {
         cbSize: std::mem::size_of::<LASTINPUTINFO>() as u32,
         dwTime: 0,
     };
-    if unsafe { !GetLastInputInfo(&mut info as _).as_bool() } {
+    if unsafe { !GetLastInputInfo(&mut info as *mut LASTINPUTINFO).as_bool() } {
         bail!(GetLastError())
     }
     Ok(info.dwTime)

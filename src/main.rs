@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use anyhow::{bail, Context, Result};
+use image::{buffer::ConvertBuffer, DynamicImage};
 use serde::Deserialize;
 use std::{
     fs::create_dir_all,
@@ -15,7 +16,6 @@ use tray_icon::{
     menu::{Menu, MenuEvent, MenuItem},
     Icon, TrayIconBuilder, TrayIconEvent,
 };
-use windows_capture::capture::GraphicsCaptureApiHandler;
 use winsafe::{prelude::*, GetLastError, HMONITOR, HPROCESSLIST, HWND};
 
 #[derive(Deserialize, Clone)]
@@ -123,33 +123,7 @@ fn get_valid_window(config: &Config) -> Result<(u32, String)> {
     Ok((window.ptr() as u32, name))
 }
 
-struct Screenshot {
-    target: String,
-}
-
-impl GraphicsCaptureApiHandler for Screenshot {
-    type Flags = String;
-    type Error = anyhow::Error;
-
-    fn new(flags: Self::Flags) -> Result<Self, Self::Error> {
-        Ok(Self { target: flags })
-    }
-
-    fn on_frame_arrived(
-        &mut self,
-        frame: &mut windows_capture::frame::Frame,
-        capture_control: windows_capture::graphics_capture_api::InternalCaptureControl,
-    ) -> Result<(), Self::Error> {
-        frame.save_as_image(&self.target, windows_capture::frame::ImageFormat::Jpeg)?;
-        capture_control.stop();
-        Ok(())
-    }
-}
-
 fn save_screenshot(target_path: &Path, id: u32, name: &str) -> Result<()> {
-    let window = windows_capture::window::Window::from_raw_hwnd(id as _);
-    let monitor = window.monitor().context("No monitor for window")?;
-
     let gamedir = target_path.join(name);
     create_dir_all(&gamedir)?;
 
@@ -160,13 +134,15 @@ fn save_screenshot(target_path: &Path, id: u32, name: &str) -> Result<()> {
     let filename = gamedir.join(filename);
     let filename = filename.to_str().context("path to string")?;
 
-    Screenshot::start(windows_capture::settings::Settings::new(
-        monitor,
-        windows_capture::settings::CursorCaptureSettings::Default,
-        windows_capture::settings::DrawBorderSettings::WithoutBorder,
-        windows_capture::settings::ColorFormat::Bgra8,
-        filename.to_string(),
-    ))?;
+    use xcap::Window;
+    let windows = Window::all()?;
+    let window = windows
+        .iter()
+        .find(|w| w.id() == id)
+        .context("Failed to find window")?;
+    DynamicImage::from(window.capture_image()?)
+        .to_rgb8()
+        .save(filename)?;
     Ok(())
 }
 
